@@ -3,8 +3,6 @@ from vllm import LLM, SamplingParams
 from openai import OpenAI
 import os
 import sys
-# from vllm.model_executor.adapters import lora
-# from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from vllm.lora.request import LoRARequest
 from huggingface_hub import snapshot_download
 from pathlib import Path
@@ -18,12 +16,6 @@ import concurrent.futures
 import threading
 import time
 import json
-sys.path.insert(0, str(Path("/local2/jrgan/dLLM-Cache")))
-sys.path.insert(0, str(Path("/local2/jrgan/LLaDA")))
-from generate import generate as generate_llada
-from cache import dLLMCache, dLLMCacheConfig
-from hook import register_cache_LLaDA, logout_cache_LLaDA
-from dataclasses import asdict
 
 
 class LLMManager:
@@ -108,46 +100,13 @@ class LLMManager:
     def _initialize_llm(self, tensor_parallel_size, gpu_memory_utilization):
         if "gpt" in self.base_model:
             return OpenAI(api_key=os.environ.get("OPENAI_API_KEY")), None
-        elif "deepseek" in self.base_model:
-            self.api_keys = self._load_api_keys()
-            self.current_key_index = 0
-            return OpenAI(base_url="https://openrouter.ai/api/v1",
-                          api_key=self.api_keys[self.current_key_index]), None
-        elif "LLaDA" in self.base_model:
-            tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
-            llm = AutoModel.from_pretrained(self.base_model, trust_remote_code=True, torch_dtype=torch.bfloat16)
-            dLLMCache.new_instance(
-                **asdict(
-                    dLLMCacheConfig(prompt_interval_steps=100, gen_interval_steps=7, transfer_ratio=0.25)
-                )
-            )
-            register_cache_LLaDA(llm, "model.transformer.blocks")
-            return llm, tokenizer
-        elif "crystalllm" in self.base_model:
-            vllm_model = LLM(
-                model="meta-llama/Llama-3.1-70B-Instruct",
-                tensor_parallel_size=tensor_parallel_size,  # Number of GPUs for tensor parallelism
-                gpu_memory_utilization=gpu_memory_utilization,  # Optional, default is 0.9
-                max_model_len=self._get_max_token_length(),
-                seed=self.seed,
-                trust_remote_code=True,
-                dtype="half",  # Use half precision (fp16)
-                adapter_path="JennyGan/70b-mp20-9000",  # Path to your adapter weights
-                # You can add more vLLM-specific parameters here
-                enforce_eager=False,  # Set to False to use CUDA graphs for faster execution
-                max_num_seqs=32,  # Adjust based on your throughput needs
-                max_num_batched_tokens=8192,  # Adjust based on your GPU memory
-                quantization="awq",  # Options: awq, gptq, none - try different ones
-            )
-            tokenizer = AutoTokenizer.from_pretrained(model_string)
-            return vllm_model, tokenizer
         elif "lora" in self.base_model:
             if '70b' in self.base_model:
                 base_model_id = "meta-llama/Llama-3.1-70B-Instruct"
                 lora_path = snapshot_download(repo_id="JennyGan/70b-mp20-14000")
             else:
                 base_model_id = "meta-llama/Llama-3.1-8B-Instruct"
-                lora_path = "/local2/jrgan/M2Hub/crystal-text-llm/exp/7b-test-run/checkpoint-7500"             
+                lora_path = snapshot_download(repo_id="JennyGan/8b-mp20-7500")     
             llm = LLM(model=base_model_id, enable_lora=True, 
                 dtype=torch.float16,
                 tensor_parallel_size=tensor_parallel_size,
@@ -190,24 +149,6 @@ class LLMManager:
             results = []
             for i, prompt in enumerate(tqdm(prompts, desc="GPT Generation", unit="prompt")):
                 result = self.generate_gpt(prompt)
-                results.append(result)
-            return results
-        elif "deepseek" in self.base_model:
-            results = []
-            for i, prompt in enumerate(tqdm(prompts, desc="DeepSeek Generation", unit="prompt")):
-                result = self.generate_deepseek(prompt)
-                results.append(result)
-            return results
-        elif "LLaDA" in self.base_model:
-            inputs = []
-            for prompt in prompts:
-                input_ids = self.tokenizer(prompt)['input_ids']
-                inputs.append(torch.tensor(input_ids).to(self.device).unsqueeze(0))
-            results = []
-            for i, input in enumerate(tqdm(inputs, desc="LlaDA Generation", unit="prompt")):
-                self.feature_cache = dLLMCache()
-                self.feature_cache.reset_cache(input.shape[1])
-                result = generate_llada(self.llm, input, steps=128, gen_length=2048, temperature=self.temperature)
                 results.append(result)
             return results
         elif "flowmm" in self.base_model:
