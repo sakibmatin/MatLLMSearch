@@ -84,11 +84,9 @@ If you use MatLLMSearch, please cite our paper:
 
 ```
 @article{gan2025matllmsearch,
-  title={Large Language Models Are Innate Crystal Structure Generators},
-  author={Gan, Jingru and Zhong, Peichen and Du, Yuanqi and Zhu, Yanqiao and 
-          Duan, Chenru and Wang, Haorui and Gomes, Carla P. and Persson, Kristin and 
-          Schwalbe-Koda, Daniel and Wang, Wei},
-  journal={arXiv preprint arXiv:},
-  year={2025}
+      title={MatLLMSearch: Crystal Structure Discovery with Evolution-Guided Large Language Models}, 
+      author={Jingru Gan and Peichen Zhong and Yuanqi Du and Yanqiao Zhu and Chenru Duan and Haorui Wang and Daniel Schwalbe-Koda and Carla P. Gomes and Kristin A. Persson and Wei Wang},
+      journal={arXiv preprint arXiv:2502.20933},
+      year={2025},
 }
 ```
