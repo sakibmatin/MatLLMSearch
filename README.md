@@ -1,6 +1,6 @@
-# MatLLMSearch: Large Language Models Are Innate Crystal Structure Generators
+# MatLLMSearch: Crystal Structure Discovery with Evolution-Guided Large Language Models
 
-This is the implementation for **MatLLMSearch: Large Language Models Are Innate Crystal Structure Generators**. This code implements an evolutionary search pipeline for crystal structure generation (CSG) and crystal structure prediction (CSP) with Large Language Models (LLMs) without fine-tuning.
+This is the implementation for **MatLLMSearch: Crystal Structure Discovery with Evolution-Guided Large Language Models**. This code implements an evolutionary search pipeline for crystal structure generation (CSG) and crystal structure prediction (CSP) with Large Language Models (LLMs) without fine-tuning.
 
 ## Pipeline Overview
 
