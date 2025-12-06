@@ -1,11 +1,9 @@
 import os
 
-# Environment Variables
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 os.environ['VLLM_ALLOW_LONG_MAX_MODEL_LEN'] = '1'
 os.environ['VLLM_ALLOW_RUNTIME_LORA_UPDATING'] = 'true'
-os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:2048'
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ['ENFORCE_EAGER'] = 'true'
 
@@ -22,6 +20,18 @@ Format requirements:
     }}
 }}
 2. Use proper JSON escaping for newlines (\\n) and other special characters
+
+Example for {fmt} format:
+{{
+    "0": {{
+        "formula": "Na4Cl4O8",
+        "{fmt}": "Na4Cl4O8\\n1.0\\n   0.0000    6.6353    0.0000\\n   6.5898    0.0000    0.0000\\n   0.0000   -2.9146   -5.8520\\nNa Cl O\\n4 4 8\\ndirect\\n   0.0000    0.3671    0.2500 Na\\n   0.0000    0.6329    0.7500 Na\\n   0.5000    0.8671    0.2500 Na\\n   0.5000    0.1329    0.7500 Na\\n   0.0000    0.1555    0.7500 Cl\\n   0.0000    0.8445    0.2500 Cl\\n   0.5000    0.6555    0.7500 Cl\\n   0.5000    0.3445    0.2500 Cl\\n   0.1357    0.2949    0.6564 O\\n   0.8643    0.2949    0.8436 O\\n   0.8643    0.7051    0.3436 O\\n   0.1357    0.7051    0.1564 O\\n   0.6357    0.7949    0.6564 O\\n   0.3643    0.7949    0.8436 O\\n   0.3643    0.2051    0.3436 O\\n   0.6357    0.2051    0.1564 O"
+    }}
+}}
+
+Note: Try to generate diverse structures with different elements, lattice parameters, and atomic arrangements. Create a novel material structure using seed {random_seed}.
+
+IMPORTANT: Please output only the structure data in clean JSON format with no additional text, code blocks, or explanations.
 
 Output your hypotheses below:
 """
@@ -47,6 +57,8 @@ Your task:
 1. Generate {rep_size} new structure hypotheses
 2. Each structure should be stable and physically reasonable
 3. Format each structure exactly as shown in the input
+
+IMPORTANT: Please output only the structure data in clean JSON format with no additional text, code blocks, or explanations.
 
 Output your hypotheses below:
 """
@@ -125,6 +137,8 @@ Each proposed structure must be formatted in JSON with the following structure:
 }}
 
 Use proper JSON escaping for newlines (\\n) and other special characters.
+
+IMPORTANT: Please output only the structure data in clean JSON format with no additional text, code blocks, or explanations.
 
 Output your ground state polymorph prediction below:
 """
@@ -212,7 +226,6 @@ MODEL_SETTINGS = {
     }
 }
 
-# Stability Thresholds
 STABILITY_THRESHOLDS = [0.03, 0.06]
 
 

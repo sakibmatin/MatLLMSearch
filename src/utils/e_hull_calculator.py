@@ -54,13 +54,11 @@ class EHullCalculator:
         entries = self.build_up_entry(se_list)
         e_hull = self.compute_e_hull(entries, self.ppd_mp)
 
-        # Add e_hull to se_list.
         seh_list = []
         for i, se_dict in enumerate(se_list):
             se_dict['e_hull'] = e_hull[i]
             seh_list.append(se_dict)
             
-        # Sort seh_list by e_hull.
         seh_list = sorted(seh_list, key=lambda k: k['e_hull'])
         return seh_list
     

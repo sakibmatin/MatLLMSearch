@@ -1,0 +1,227 @@
+"""Crystal Structure Prediction (CSP) mode implementation"""
+
+import os
+import sys
+import random
+import numpy as np
+from pathlib import Path
+from typing import Dict, Any
+
+from ..utils.materials_oracle import MaterialsOracle
+from ..utils.data_loader import load_seed_structures, matches_composition, matches_unit_cell_pattern
+from ..utils.structure_generator import StructureGenerator
+from pymatgen.core.composition import Composition
+
+
+class MatLLMSearchCSP:
+    """MatLLMSearch Crystal Structure Prediction project using SDE-harness framework"""
+    
+    def __init__(self, args):
+        """Initialize MatLLMSearch CSP"""
+        self.args = args
+        
+        # Initialize structure generator for CSP
+        self.structure_generator = StructureGenerator(
+            model=self.args.model,
+            temperature=self.args.temperature,
+            max_tokens=self.args.max_tokens,
+            fmt=self.args.fmt,
+            task="csp",
+            args=self.args
+        )
+        
+        # Initialize materials oracle
+        self.oracle = MaterialsOracle(
+            opt_goal="e_hull_distance",
+            mlip="orb-v3"
+        )
+    
+    def run(self, **kwargs) -> Dict[str, Any]:
+        """Run the CSP workflow"""
+        print(f"Starting Crystal Structure Prediction for {self.args.compound}")
+        print(f"Model: {self.args.model}")
+        print(f"Population size: {self.args.population_size}, Max iterations: {self.args.max_iter}")
+        
+        seed_structures = self._load_target_compound_structures()
+        
+        random.seed(self.args.seed)
+        np.random.seed(self.args.seed)
+        
+        results = self._run_csp_workflow(seed_structures)
+        
+        return results
+    
+    def _run_csp_workflow(self, seed_structures):
+        """Run CSP workflow - similar to CSG but focused on target compound"""
+        from pathlib import Path
+        import pandas as pd
+        import json
+        
+        output_path = Path(self.args.log_dir) / self.args.save_label
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        initial_structures = seed_structures[:self.args.population_size * getattr(self.args, 'parent_size', 2)] if seed_structures else []
+        if initial_structures:
+            print(f"Evaluating initial population of {len(initial_structures)} structures...")
+            current_evaluations = self.oracle.evaluate(initial_structures)
+        else:
+            current_evaluations = []
+        
+        all_generations = []
+        all_metrics = []
+        
+        for iteration in range(self.args.max_iter):
+            print(f"\n=== Iteration {iteration + 1}/{self.args.max_iter} ===")
+            
+            current_population_structures = [e.structure for e in current_evaluations] if current_evaluations else []
+            if current_population_structures:
+                print(f"Generating {self.args.reproduction_size} offspring from {len(current_population_structures)} parents")
+                new_structures = self.structure_generator.generate(
+                    current_population_structures, 
+                    num_offspring=self.args.reproduction_size
+                )
+            else:
+                print("Zero-shot generation - no parent structures available")
+                new_structures = self.structure_generator.generate(
+                    [],
+                    num_offspring=self.args.population_size
+                )
+            
+            target_comp = Composition(self.args.compound)
+            filtered_structures = []
+            for structure in new_structures:
+                if structure and (matches_composition(structure.composition, target_comp) or 
+                                matches_unit_cell_pattern(structure.composition, target_comp)):
+                    filtered_structures.append(structure)
+            
+            print(f"Generated {len(new_structures)} structures, {len(filtered_structures)} match target compound")
+            
+            if not filtered_structures:
+                print("No structures match target compound, ending optimization")
+                break
+            
+            print("Evaluating new structures...")
+            child_evaluations = self.oracle.evaluate(filtered_structures)
+            
+            filtered_parent_evaluations = []
+            for eval in current_evaluations:
+                try:
+                    if eval.structure and (matches_composition(eval.structure.composition, target_comp) or 
+                                          matches_unit_cell_pattern(eval.structure.composition, target_comp)):
+                        filtered_parent_evaluations.append(eval)
+                except Exception:
+                    continue
+            
+            all_evaluations = filtered_parent_evaluations + child_evaluations
+            print(f"Merged {len(filtered_parent_evaluations)} parent evaluations (filtered) with {len(child_evaluations)} child evaluations")
+            
+            generation_data = []
+            for i, (structure, evaluation) in enumerate(zip(filtered_structures, child_evaluations)):
+                if structure and evaluation:
+                    generation_data.append({
+                        'Iteration': iteration + 1,
+                        'Structure': json.dumps(structure.as_dict()),
+                        'Composition': str(structure.composition),
+                        'EHullDistance': evaluation.e_hull_distance,
+                        'EnergyRelaxed': evaluation.energy_relaxed,
+                        'Objective': evaluation.objective,
+                        'Valid': evaluation.valid
+                    })
+            
+            all_generations.extend(generation_data)
+            
+            metrics = self.oracle.get_metrics(all_evaluations)
+            metrics['iteration'] = iteration + 1
+            all_metrics.append(metrics)
+            
+            print(f"Metrics: {metrics}")
+            
+            valid_evaluations = [e for e in all_evaluations if e.valid]
+            if valid_evaluations:
+                ranked_evaluations = self.oracle.rank_structures(valid_evaluations, ascending=True)
+                current_evaluations = ranked_evaluations[:self.args.population_size]
+                print(f"Updated population: {len(current_evaluations)} structures")
+            else:
+                print("No valid structures found, keeping previous population")
+        
+        # Save results
+        if all_generations:
+            generations_df = pd.DataFrame(all_generations)
+            generations_df.to_csv(output_path / "generations.csv", index=False)
+        
+        if all_metrics:
+            metrics_df = pd.DataFrame(all_metrics)
+            metrics_df.to_csv(output_path / "metrics.csv", index=False)
+        
+        results = {
+            'total_structures': len(all_generations),
+            'iterations': len(all_metrics),
+            'final_metrics': all_metrics[-1] if all_metrics else {},
+            'output_path': str(output_path),
+            'target_compound': self.args.compound
+        }
+        
+        return results
+    
+    def _load_target_compound_structures(self):
+        """Load seed structures that match the target compound pattern"""
+        
+        all_seeds = load_seed_structures(
+            data_path=self.args.data_path,  # Use specified data path
+            task="csp",
+            random_seed=self.args.seed
+        )
+        
+        if not all_seeds:
+            print(f"No seed structures found, using zero-shot generation for {self.args.compound}")
+            return []
+        
+        # Filter structures that match the target compound pattern
+        target_comp = Composition(self.args.compound)
+        matching_structures = []
+        
+        for structure in all_seeds:
+            if structure is None:
+                continue
+                
+            try:
+                if matches_unit_cell_pattern(structure.composition, target_comp):
+                    matching_structures.append(structure)
+                elif matches_composition(structure.composition, target_comp):
+                    matching_structures.append(structure)
+            except Exception as e:
+                print(f"Error checking structure composition: {e}")
+                continue
+        
+        print(f"Found {len(matching_structures)} seed structures matching {self.args.compound} pattern")
+        
+        if not matching_structures:
+            print(f"No exact matches found, using structures with similar element count")
+            target_elem_count = len(target_comp.elements)
+            
+            for structure in all_seeds[:100]:  # Limit to first 100 for efficiency
+                if structure is None:
+                    continue
+                    
+                try:
+                    if len(structure.composition.elements) == target_elem_count:
+                        matching_structures.append(structure)
+                except Exception:
+                    continue
+            
+            print(f"Found {len(matching_structures)} structures with {target_elem_count} elements")
+        
+        return matching_structures[:50]
+
+
+def run_csp(args) -> Dict[str, Any]:
+    """Run Crystal Structure Prediction mode"""
+    
+    valid_compounds = ["Ag6O2", "Bi2F8", "Co2Sb2", "Co4B2", "Cr4Si4", "KZnF3", "Sr2O4", "YMg3"]
+    if args.compound not in valid_compounds:
+        raise ValueError(f"Compound {args.compound} not supported. Choose from: {valid_compounds}")
+    
+    project = MatLLMSearchCSP(args=args)
+    results = project.run()
+    
+    return results
